@@ -1,44 +1,40 @@
 package com.nakshatra.backup_saas.config;
 
 import com.nakshatra.backup_saas.common.context.TenantContext;
-import com.nakshatra.backup_saas.tenant.TenantDatabase;
-import com.nakshatra.backup_saas.tenant.TenantDatabaseRepository;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.jdbc.DataSourceBuilder;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.lookup.AbstractRoutingDataSource;
 
 import javax.sql.DataSource;
-import java.sql.Connection;
-import java.sql.PreparedStatement;
-import java.sql.ResultSet;
+import java.sql.*;
 import java.util.HashMap;
 import java.util.Map;
 
 @Configuration
 public class DataSourceConfig {
 
+    private final DataSource masterDataSource;
 
-    private final JdbcTemplate jdbcTemplate;
+    // 🔥 GLOBAL CACHE
+    private final Map<Object, DataSource> tenantDataSources = new HashMap<>();
 
-    public DataSourceConfig(@Qualifier("masterJdbcTemplate") JdbcTemplate jdbcTemplate) {
-        this.jdbcTemplate = jdbcTemplate;
+    public DataSourceConfig(@Qualifier("masterDataSource") DataSource masterDataSource) {
+        this.masterDataSource = masterDataSource;
     }
 
+    // 🔥 used by initializer
+    public void addTenantDataSource(Long tenantId, DataSource ds) {
+        tenantDataSources.put(tenantId, ds);
+    }
 
-    @Bean(name = "routingDataSource")
+    @Bean
     @Primary
-    public DataSource routingDataSource(@Qualifier("masterDataSource") DataSource masterDataSource) {
+    public DataSource routingDataSource() {
 
-        Map<Object, Object> dataSources = new HashMap<>();
-        dataSources.put("MASTER", masterDataSource);
-
-        AbstractRoutingDataSource routingDataSource = new AbstractRoutingDataSource() {
-
-            private final Map<Object, DataSource> tenantDataSources = new HashMap<>();
+        AbstractRoutingDataSource routing = new AbstractRoutingDataSource() {
 
             @Override
             protected Object determineCurrentLookupKey() {
@@ -54,44 +50,23 @@ public class DataSourceConfig {
                     return masterDataSource;
                 }
 
-                if (!tenantDataSources.containsKey(tenantId)) {
+                DataSource ds = tenantDataSources.get(tenantId);
 
-                    try (Connection conn = masterDataSource.getConnection();
-                         PreparedStatement ps = conn.prepareStatement(
-                                 "SELECT * FROM tenant_databases WHERE tenant_id = ?")) {
-
-                        ps.setLong(1, tenantId);
-                        ResultSet rs = ps.executeQuery();
-
-                        if (!rs.next()) {
-                            throw new RuntimeException("DB config not found");
-                        }
-
-                        String url = "jdbc:mysql://" + rs.getString("host") + ":" + rs.getInt("port")
-                                + "/" + rs.getString("database_name");
-
-                        DataSource ds = DataSourceBuilder.create()
-                                .url(url)
-                                .username(rs.getString("username"))
-                                .password(rs.getString("password_encrypted"))
-                                .driverClassName("com.mysql.cj.jdbc.Driver")
-                                .build();
-
-                        tenantDataSources.put(tenantId, ds);
-
-                    } catch (Exception e) {
-                        throw new RuntimeException(e);
-                    }
+                if (ds == null) {
+                    throw new RuntimeException("Tenant datasource not initialized");
                 }
 
-                return tenantDataSources.get(tenantId);
+                return ds;
             }
         };
 
-        routingDataSource.setTargetDataSources(dataSources);
-        routingDataSource.setDefaultTargetDataSource(masterDataSource);
-        routingDataSource.afterPropertiesSet();
+        Map<Object, Object> map = new HashMap<>();
+        map.put("MASTER", masterDataSource);
 
-        return routingDataSource;
+        routing.setTargetDataSources(map);
+        routing.setDefaultTargetDataSource(masterDataSource);
+        routing.afterPropertiesSet();
+
+        return routing;
     }
 }
