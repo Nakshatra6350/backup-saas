@@ -1,8 +1,10 @@
 package com.nakshatra.backup_saas.backup;
 
+import com.nakshatra.backup_saas.storage.StorageService;
 import com.nakshatra.backup_saas.tenant.TenantDatabase;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
 import java.io.File;
@@ -14,21 +16,26 @@ import org.slf4j.LoggerFactory;
 @Service
 public class BackupService {
 
+    private final BackupQueueService queueService;
     private final BackupExecutor executor;
     private final BackupHistoryRepository historyRepository;
     private final ClientDatabaseRepository clientDbRepo;
+    private final StorageService storageService;
     private static final Logger log = LoggerFactory.getLogger(BackupService.class);
 
     public BackupService(
-            BackupExecutor executor,
+            BackupQueueService queueService, BackupExecutor executor,
             BackupHistoryRepository historyRepository,
-            ClientDatabaseRepository clientDbRepo) {
+            ClientDatabaseRepository clientDbRepo, StorageService storageService) {
+        this.queueService = queueService;
 
         this.executor = executor;
         this.historyRepository = historyRepository;
         this.clientDbRepo = clientDbRepo;
+        this.storageService = storageService;
     }
 
+    @Async("backupExecutorPool")
     public void backupDatabase(Long clientDbId) {
 
         // 🔥 Fetch CLIENT DB from TENANT DB
@@ -63,17 +70,28 @@ public class BackupService {
             );
 
             File file = new File(filePath);
-
-            history.setFilePath(filePath);
+            String storedPath = storageService.store(file);
+            history.setFilePath(storedPath);
             history.setFileSize(file.length());
             history.setStatus("SUCCESS");
 
         } catch (Exception e) {
 
-            history.setStatus("FAILED");
-            log.error("Backup failed for DB: {}", db.getDatabaseName(), e);
+            history.setErrorMessage(e.getMessage());
+            history.setRetryCount(
+                    history.getRetryCount() == null ? 1 : history.getRetryCount() + 1
+            );
 
-            throw new RuntimeException("Backup failed", e);
+            historyRepository.save(history);
+
+            if (history.getRetryCount() < 3) {
+                queueService.enqueue(clientDbId);
+            } else{
+                log.error("Backup failed for DB: {}", db.getDatabaseName(), e);
+                throw new RuntimeException("Backup failed", e);
+            }
+
+
         }
 
         history.setCompletedAt(LocalDateTime.now());

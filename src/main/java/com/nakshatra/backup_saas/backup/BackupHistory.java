@@ -23,4 +23,8 @@ public class BackupHistory {
 
     private LocalDateTime startedAt;
     private LocalDateTime completedAt;
+
+    private Integer retryCount = 0;
+
+    private String errorMessage;
 }
