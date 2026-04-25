@@ -1,34 +1,51 @@
 package com.nakshatra.backup_saas.backup;
 
+import com.nakshatra.backup_saas.common.util.CryptoUtil;
+import com.nakshatra.backup_saas.storage.StorageService;
 import com.nakshatra.backup_saas.tenant.TenantDatabase;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
 import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
 import java.time.LocalDateTime;
 import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.crypto.Cipher;
+import javax.crypto.spec.SecretKeySpec;
+
 @Service
 public class BackupService {
 
+
+    private final BackupQueueService queueService;
     private final BackupExecutor executor;
     private final BackupHistoryRepository historyRepository;
     private final ClientDatabaseRepository clientDbRepo;
+    private final StorageService storageService;
+    private final CryptoUtil cryptoUtil;
     private static final Logger log = LoggerFactory.getLogger(BackupService.class);
 
     public BackupService(
-            BackupExecutor executor,
+            BackupQueueService queueService, BackupExecutor executor,
             BackupHistoryRepository historyRepository,
-            ClientDatabaseRepository clientDbRepo) {
+            ClientDatabaseRepository clientDbRepo, StorageService storageService, CryptoUtil cryptoUtil) {
+        this.queueService = queueService;
 
         this.executor = executor;
         this.historyRepository = historyRepository;
         this.clientDbRepo = clientDbRepo;
+        this.storageService = storageService;
+        this.cryptoUtil = cryptoUtil;
     }
 
+    @Async("backupExecutorPool")
     public void backupDatabase(Long clientDbId) {
 
         // 🔥 Fetch CLIENT DB from TENANT DB
@@ -53,31 +70,49 @@ public class BackupService {
             String filePath = folder + db.getDatabaseName()
                     + "_" + System.currentTimeMillis() + ".sql";
 
+            String decryptedPassword = cryptoUtil.decrypt(db.getPassword());
+
+//            db.setPassword(cryptoUtil.encrypt(password)); // use it where ever needed in future while saving db config
+
             executor.executeMySqlBackup(
                     db.getHost(),
                     db.getPort(),
                     db.getUsername(),
-                    db.getPassword(),
+                    decryptedPassword,
                     db.getDatabaseName(),
                     filePath
             );
 
             File file = new File(filePath);
-
-            history.setFilePath(filePath);
+            File encrypted = cryptoUtil.encryptFile(file);
+            String storedPath = storageService.store(encrypted);
+            history.setFilePath(storedPath);
             history.setFileSize(file.length());
             history.setStatus("SUCCESS");
 
         } catch (Exception e) {
 
-            history.setStatus("FAILED");
-            log.error("Backup failed for DB: {}", db.getDatabaseName(), e);
+            history.setErrorMessage(e.getMessage());
+            history.setRetryCount(
+                    history.getRetryCount() == null ? 1 : history.getRetryCount() + 1
+            );
 
-            throw new RuntimeException("Backup failed", e);
+            historyRepository.save(history);
+
+            if (history.getRetryCount() < 3) {
+                queueService.enqueue(clientDbId);
+            } else{
+                log.error("Backup failed for DB: {}", db.getDatabaseName(), e);
+                throw new RuntimeException("Backup failed", e);
+            }
+
+
         }
 
         history.setCompletedAt(LocalDateTime.now());
 
         historyRepository.save(history);
     }
+
+
 }
