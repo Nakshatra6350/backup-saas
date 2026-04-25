@@ -15,7 +15,7 @@ public class StorageConfig {
     public StorageService storageService(
             S3StorageService s3,
             LocalStorageService local,
-            ExternalConfigService externalConfigService) { // ✅ inject this
+            TenantConfigService externalConfigService) { // ✅ inject this
 
         return new StorageService() {
 

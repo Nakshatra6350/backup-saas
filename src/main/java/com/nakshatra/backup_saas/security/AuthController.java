@@ -4,19 +4,17 @@ import com.nakshatra.backup_saas.common.context.TenantContext;
 import com.nakshatra.backup_saas.common.exception.NotFoundException;
 import com.nakshatra.backup_saas.common.response.ApiResponse;
 import com.nakshatra.backup_saas.common.response.ResponseUtil;
-import com.nakshatra.backup_saas.common.util.TraceIdUtil;
 import com.nakshatra.backup_saas.security.dto.LoginRequest;
 import com.nakshatra.backup_saas.security.dto.LoginResponse;
-import com.nakshatra.backup_saas.tenant.Tenant;
-import com.nakshatra.backup_saas.tenant.TenantRepository;
-import com.nakshatra.backup_saas.tenant.User;
-import com.nakshatra.backup_saas.tenant.UserRepository;
+import com.nakshatra.backup_saas.security.util.JwtUtil;
+import com.nakshatra.backup_saas.tenant.entity.Tenant;
+import com.nakshatra.backup_saas.tenant.repository.TenantRepository;
+import com.nakshatra.backup_saas.tenant.entity.User;
+import com.nakshatra.backup_saas.tenant.repository.UserRepository;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.*;
-
-import java.util.Map;
 
 @RestController
 @RequestMapping("/auth")

@@ -1,7 +1,7 @@
 package com.nakshatra.backup_saas.config;
 
 import com.nakshatra.backup_saas.common.util.TraceIdUtil;
-import com.nakshatra.backup_saas.security.JwtFilter;
+import com.nakshatra.backup_saas.security.filter.JwtFilter;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
