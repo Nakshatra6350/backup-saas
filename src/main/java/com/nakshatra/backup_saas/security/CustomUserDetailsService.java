@@ -14,11 +14,12 @@ import org.springframework.stereotype.Service;
 public class CustomUserDetailsService implements UserDetailsService {
 
 
-    private final JdbcTemplate jdbcTemplate;
+    private final UserRepository userRepository;
 
-    public CustomUserDetailsService(@Qualifier("masterJdbcTemplate") JdbcTemplate jdbcTemplate) {
-        this.jdbcTemplate = jdbcTemplate;
+    public CustomUserDetailsService(UserRepository userRepository) {
+        this.userRepository = userRepository;
     }
+
 
     @Override
     public UserDetails loadUserByUsername(String email) throws UsernameNotFoundException {
@@ -30,19 +31,10 @@ public class CustomUserDetailsService implements UserDetailsService {
         }
 
         try{
-            User user = jdbcTemplate.queryForObject(
-                    "SELECT * FROM users WHERE email = ? AND tenant_id = ?",
-                    new Object[]{email, tenantId},
-                    (rs, rowNum) -> {
-                        User u = new User();
-                        u.setId(rs.getLong("id"));
-                        u.setEmail(rs.getString("email"));
-                        u.setPasswordHash(rs.getString("password_hash"));
-                        u.setRole(rs.getString("role"));
-                        u.setTenantId(rs.getLong("tenant_id"));
-                        return u;
-                    }
-            );
+
+            // 🔥 This will hit correct tenant DB via routing
+            User user = userRepository.findByEmail(email)
+                    .orElseThrow(() -> new UsernameNotFoundException("User not found"));
 
             return org.springframework.security.core.userdetails.User
                     .withUsername(user.getEmail())

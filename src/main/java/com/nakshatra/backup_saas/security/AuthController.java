@@ -1,5 +1,6 @@
 package com.nakshatra.backup_saas.security;
 
+import com.nakshatra.backup_saas.common.context.TenantContext;
 import com.nakshatra.backup_saas.common.exception.NotFoundException;
 import com.nakshatra.backup_saas.common.response.ApiResponse;
 import com.nakshatra.backup_saas.common.response.ResponseUtil;
@@ -25,15 +26,16 @@ public class AuthController {
     private final PasswordEncoder passwordEncoder;
     private final TenantRepository tenantRepository;
     private final JdbcTemplate jdbcTemplate;
-
+    private final UserRepository userRepository;
     public AuthController(@Qualifier("masterJdbcTemplate") JdbcTemplate jdbcTemplate,
                           JwtUtil jwtUtil,
                           PasswordEncoder passwordEncoder,
-                          TenantRepository tenantRepository) {
+                          TenantRepository tenantRepository, UserRepository userRepository) {
         this.jdbcTemplate = jdbcTemplate;
         this.jwtUtil = jwtUtil;
         this.passwordEncoder = passwordEncoder;
         this.tenantRepository = tenantRepository;
+        this.userRepository = userRepository;
     }
 
     @PostMapping("/login")
@@ -41,32 +43,30 @@ public class AuthController {
             @RequestHeader("X-Tenant-Id") String tenantIdentifier,
             @RequestBody LoginRequest request) {
 
-        Map<String, Object> tenant = jdbcTemplate.queryForMap(
-                "SELECT * FROM tenants WHERE identifier = ?",
-                tenantIdentifier
-        );
+        Tenant tenant = tenantRepository.findByIdentifier(tenantIdentifier)
+                .orElseThrow(() -> new NotFoundException("Tenant not found"));
 
-        User user = jdbcTemplate.queryForObject(
-                "SELECT * FROM users WHERE email = ? AND tenant_id = ?",
-                new Object[]{request.getEmail(), tenant.get("id")},
-                (rs, rowNum) -> {
-                    User u = new User();
-                    u.setId(rs.getLong("id"));
-                    u.setEmail(rs.getString("email"));
-                    u.setPasswordHash(rs.getString("password_hash"));
-                    u.setRole(rs.getString("role"));
-                    u.setTenantId(rs.getLong("tenant_id"));
-                    return u;
-                }
-        );
+        TenantContext.setTenantId(tenant.getId());
 
-        if (!passwordEncoder.matches(request.getPassword(), user.getPasswordHash())) {
-            throw new RuntimeException("Invalid credentials");
+        try {
+            // 3️⃣ Now JPA will use TENANT DB automatically
+            User user = userRepository.findByEmail(request.getEmail())
+                    .orElseThrow(() -> new RuntimeException("User not found"));
+
+            // 4️⃣ Password check
+            if (!passwordEncoder.matches(request.getPassword(), user.getPasswordHash())) {
+                throw new RuntimeException("Invalid credentials");
+            }
+
+            // 5️⃣ Generate JWT (include tenantId)
+            String token = jwtUtil.generateToken(user.getEmail(), tenant.getId());
+
+            return ResponseUtil.success(
+                    LoginResponse.builder().token(token).build()
+            );
+
+        } finally {
+            TenantContext.clear();
         }
-
-        String token = jwtUtil.generateToken(user.getEmail(), user.getTenantId());
-
-        return ResponseUtil.success(
-                LoginResponse.builder().token(token).build());
     }
 }

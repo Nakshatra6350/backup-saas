@@ -11,10 +11,10 @@ import javax.sql.DataSource;
 public class FlywayConfig {
 
     @Bean(initMethod = "migrate")
-    public Flyway flyway(@Qualifier("masterDataSource") DataSource masterDataSource) {
+    public Flyway flyway(@Qualifier("masterDataSource") DataSource ds) {
 
         return Flyway.configure()
-                .dataSource(masterDataSource)   // 🔥 ONLY master DB
+                .dataSource(ds)
                 .locations("classpath:db/migration")
                 .baselineOnMigrate(true)
                 .load();
